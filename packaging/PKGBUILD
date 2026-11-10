@@ -1,0 +1,52 @@
+# Maintainer: Morris Bollhalter <contact@mo-freelancer.ch>
+pkgname=omabundle
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Install AppImages, Arch packages, Flatpaks and portable archives natively on Omarchy"
+arch=('any')
+url="https://github.com/slomo-b/omabundle"
+license=('MIT')
+depends=(
+  'bash'
+  'coreutils'
+  'util-linux'
+  'jq'
+  'libarchive'
+  'file'
+  'desktop-file-utils'
+  'xdg-utils'
+  'shared-mime-info'
+  'squashfs-tools'
+)
+optdepends=(
+  'fuse2: run AppImages'
+  'flatpak: install Flatpaks'
+)
+install="$pkgname.install"
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# Placeholder until the v$pkgver tag exists. After tagging, run `updpkgsums`
+# in this directory (pacman-contrib) so the AUR package ships a real checksum.
+sha256sums=('SKIP')
+
+package() {
+  local dest="$pkgdir/usr/share/$pkgname"
+  local src="$srcdir/$pkgname-$pkgver"
+
+  install -d "$dest/bin" "$dest/lib" "$dest/adapters"
+  install -d "$pkgdir/usr/bin"
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  install -d "$pkgdir/usr/share/doc/$pkgname"
+
+  install -m755 "$src/bin/omabundle" "$dest/bin/omabundle"
+  install -m755 "$src/bin/omabundle-handle" "$dest/bin/omabundle-handle"
+  install -m644 "$src"/lib/*.sh "$dest/lib/"
+  install -m644 "$src"/adapters/*.sh "$dest/adapters/"
+
+  ln -s "/usr/share/$pkgname/bin/omabundle" "$pkgdir/usr/bin/omabundle"
+  ln -s "/usr/share/$pkgname/bin/omabundle" "$pkgdir/usr/bin/omab"
+  ln -s "/usr/share/$pkgname/bin/omabundle-handle" "$pkgdir/usr/bin/omabundle-handle"
+
+  install -m644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -m644 "$src/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -m644 "$src/SECURITY.md" "$pkgdir/usr/share/doc/$pkgname/SECURITY.md"
+}

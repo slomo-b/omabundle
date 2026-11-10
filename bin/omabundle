@@ -1,0 +1,417 @@
+#!/usr/bin/env bash
+# omabundle — install AppImages, Arch packages, Flatpaks and portable
+# archives natively on Omarchy, and remove them cleanly again.
+#
+# Deliberately unsupported: .deb, .rpm, .snap and self-extracting .run
+# installers. Those need a foreign package manager or write into the system
+# unchecked; both are the road to a broken Arch install.
+set -euo pipefail
+umask 077
+
+SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
+ROOT=$(cd -- "$(dirname -- "$SELF")/.." && pwd)
+
+OMABUNDLE_PREFIX=${OMABUNDLE_PREFIX:-$HOME/.local/opt}
+OMABUNDLE_STATE=${OMABUNDLE_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omabundle}
+OMABUNDLE_APPS=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+OMABUNDLE_ICONS=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor
+OMABUNDLE_BIN=${OMABUNDLE_BIN:-$HOME/.local/bin}
+
+OMABUNDLE_DRYRUN=0
+OMABUNDLE_JSON=0
+OMABUNDLE_YES=0
+
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/detect.sh"
+source "$ROOT/lib/ledger.sh"
+source "$ROOT/lib/integrate.sh"
+
+trap cleanup_tmpdirs EXIT
+
+usage() {
+  cat <<'EOF'
+omabundle — portable Linux-Programme nativ auf Omarchy installieren
+
+Verwendung:
+  omabundle install <datei|app-id>   AppImage, .pkg.tar.*, Flatpak, Tarball
+  omabundle list                     Installiertes anzeigen
+  omabundle remove <slug>            Deinstallieren (nur Ledger-Einträge)
+  omabundle doctor                   Installationen und Verknüpfungen prüfen
+  omabundle detect <datei>           Format erkennen, ohne etwas zu tun
+  omabundle integration enable       Doppelklick auf Downloads installiert direkt
+  omabundle integration status|disable
+
+Optionen:
+  -n, --dry-run    nur zeigen, was passieren würde
+      --json       maschinenlesbares Ergebnis auf stdout
+  -y, --yes        Rückfragen überspringen (pacman-Aufrufe!)
+  -h, --help       diese Hilfe
+
+Nicht unterstützt (mit Begründung): .deb, .rpm, .snap, selbstentpackende .run.
+Für .deb/.rpm: distrobox (echte Debian-Umgebung) oder debtap (Konvertierung).
+EOF
+}
+
+adapter_for() {
+  case $1 in
+    appimage) printf 'appimage' ;;
+    archpkg) printf 'archpkg' ;;
+    flatpak | flatpakref) printf 'flatpak' ;;
+    portable) printf 'portable' ;;
+    *) printf '' ;;
+  esac
+}
+
+take_install_lock() {
+  (( OMABUNDLE_DRYRUN )) && return 0
+  mkdir -p "$OMABUNDLE_STATE"
+  chmod 700 "$OMABUNDLE_STATE" 2>/dev/null || true
+  exec 9>"$OMABUNDLE_STATE/install.lock"
+  flock -w 60 9 || die "eine andere Installation läuft gerade"
+}
+
+cmd_install() {
+  local target=${1:-} kind adapter
+
+  [[ -n $target ]] || die "Verwendung: omabundle install <datei|app-id>"
+
+  if [[ -e $target ]]; then
+    [[ -f $target ]] || die "keine reguläre Datei: $target"
+    kind=$(detect_kind "$target" || true)
+  elif [[ $target =~ ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){2,}$ ]]; then
+    kind=flatpakid
+  else
+    die "Datei nicht gefunden: $target"
+  fi
+
+  case $kind in
+    deb | rpm | snap | run)
+      die "$(detect_reason "$kind")"
+      ;;
+    elf)
+      die "$(detect_reason elf)"
+      ;;
+    unknown | '')
+      die "$(detect_reason unknown)"
+      ;;
+  esac
+
+  take_install_lock
+
+  if [[ $kind == flatpakid ]]; then
+    need jq
+    source "$ROOT/adapters/flatpak.sh"
+    adapter_flatpak_install_id "$target"
+    return 0
+  fi
+
+  adapter=$(adapter_for "$kind")
+  [[ -n $adapter ]] || die "kein Adapter für Format: $kind"
+  need jq
+
+  source "$ROOT/adapters/$adapter.sh"
+  case $kind in
+    appimage) adapter_appimage_install "$target" ;;
+    archpkg) adapter_archpkg_install "$target" ;;
+    flatpak) adapter_flatpak_install "$target" bundle ;;
+    flatpakref) adapter_flatpak_install "$target" ref ;;
+    portable) adapter_portable_install "$target" ;;
+  esac
+}
+
+cmd_list() {
+  local out
+  out=$(ledger_list | jq -r '[.slug, (.version // "-"), .kind, (.source // "-")] | @tsv' 2>/dev/null \
+    | tr -d '\000-\010\013\014\016-\037\177' || true)
+  [[ -n $out ]] || { log "Nichts installiert."; return 0; }
+
+  if (( OMABUNDLE_JSON )); then
+    ledger_list
+    return 0
+  fi
+
+  if command -v column >/dev/null 2>&1; then
+    printf 'NAME\tVERSION\tART\tQUELLE\n%s\n' "$out" | column -t -s $'\t'
+  else
+    printf 'NAME\tVERSION\tART\tQUELLE\n%s\n' "$out"
+  fi
+}
+
+cmd_remove() {
+  local slug=${1:-} entry kind rc=0 prefix
+  [[ -n $slug ]] || die "Verwendung: omabundle remove <slug>"
+  is_safe_slug "$slug" || die "ungültiger Name: $slug"
+
+  entry=$(ledger_get "$slug") || true
+  [[ -n $entry ]] || die "'$slug' steht nicht im Ledger (omabundle list)"
+
+  kind=$(jq -r '.kind' <<<"$entry")
+
+  case $kind in
+    appimage | portable)
+      prefix=$(jq -r '.prefix // ""' <<<"$entry")
+      prefix_is_safe "$slug" "$prefix" \
+        || die "Ledger-Eintrag zeigt außerhalb von $OMABUNDLE_PREFIX/$slug: $prefix"
+      step "Entferne $prefix"
+      (( OMABUNDLE_DRYRUN )) && return 0
+      rm -rf -- "$prefix"
+      rmdir --ignore-fail-on-non-empty -- "$OMABUNDLE_PREFIX/$slug" 2>/dev/null || true
+      remove_integration "$slug"
+      ;;
+    flatpak)
+      local ref
+      ref=$(jq -r '.ref // ""' <<<"$entry")
+      [[ $ref =~ ^[A-Za-z0-9._-]+$ ]] || die "ungültige Flatpak-Ref im Ledger: $ref"
+      step "flatpak uninstall $ref"
+      (( OMABUNDLE_DRYRUN )) && return 0
+      flatpak uninstall --user --noninteractive -y "$ref"
+      ;;
+    archpkg)
+      local pkg
+      pkg=$(jq -r '.pkg // ""' <<<"$entry")
+      [[ $pkg =~ ^[a-z0-9@._+-]+$ ]] || die "ungültiger Paketname im Ledger: $pkg"
+      step "pacman -Rns $pkg"
+      (( OMABUNDLE_DRYRUN )) && return 0
+      confirm "pacman -Rns $pkg ausführen (sudo)?" || die "abgebrochen"
+      if [[ $(id -u) -eq 0 ]]; then
+        pacman -Rns --noconfirm -- "$pkg"
+      else
+        sudo pacman -Rns --noconfirm -- "$pkg"
+      fi
+      ;;
+    *)
+      die "unbekannte Art im Ledger: $kind"
+      ;;
+  esac
+
+  ledger_delete "$slug"
+  log "✓ $slug entfernt"
+}
+
+cmd_doctor() {
+  local entry slug kind prefix binary ref pkg problems=0 link k found
+  local -a known=()
+
+  while IFS= read -r entry; do
+    [[ -n $entry ]] || continue
+    slug=$(jq -r '.slug' <<<"$entry")
+    kind=$(jq -r '.kind' <<<"$entry")
+    known+=("$slug")
+    is_safe_slug "$slug" \
+      || { warn "ungültiger Name im Ledger: $slug"; problems=$((problems + 1)); }
+
+    case $kind in
+      appimage | portable)
+        prefix=$(jq -r '.prefix // ""' <<<"$entry")
+        binary=$(jq -r '.binary // ""' <<<"$entry")
+        prefix_is_safe "$slug" "$prefix" \
+          || { warn "$slug: Ablage zeigt außerhalb von $OMABUNDLE_PREFIX ($prefix)"; problems=$((problems + 1)); }
+        [[ -d $prefix ]] || { warn "$slug: Ablage fehlt ($prefix)"; problems=$((problems + 1)); }
+        [[ -x $binary ]] || { warn "$slug: Binary fehlt oder ist nicht ausführbar ($binary)"; problems=$((problems + 1)); }
+        [[ -f $OMABUNDLE_APPS/$slug.desktop ]] \
+          || { warn "$slug: Menüeintrag fehlt"; problems=$((problems + 1)); }
+        [[ -L $OMABUNDLE_BIN/$slug ]] \
+          || { warn "$slug: Befehl in ~/.local/bin fehlt"; problems=$((problems + 1)); }
+        ;;
+      archpkg)
+        pkg=$(jq -r '.pkg' <<<"$entry")
+        pacman -Q -- "$pkg" >/dev/null 2>&1 || { warn "$slug: Paket $pkg ist nicht installiert"; problems=$((problems + 1)); }
+        ;;
+      flatpak)
+        ref=$(jq -r '.ref' <<<"$entry")
+        flatpak info --user "$ref" >/dev/null 2>&1 || { warn "$slug: Flatpak $ref fehlt"; problems=$((problems + 1)); }
+        ;;
+    esac
+  done < <(ledger_list)
+
+  # symlinks we own but no longer track
+  for link in "$OMABUNDLE_BIN"/*; do
+    [[ -L $link ]] || continue
+    [[ $(readlink -f -- "$link") == "$OMABUNDLE_PREFIX"/* ]] || continue
+    slug=$(basename -- "$link")
+    found=0
+    for k in ${known[@]+"${known[@]}"}; do
+      [[ $k == "$slug" ]] && { found=1; break; }
+    done
+    if (( ! found )); then
+      warn "verwaiste Verknüpfung: $link"
+      problems=$((problems + 1))
+    fi
+  done
+
+  if (( problems == 0 )); then
+    log "✓ alles in Ordnung (${#known[@]} Einträge)"
+    return 0
+  fi
+  return 1
+}
+
+# ---- desktop integration: make a double click on a downloaded bundle work ----
+OMABUNDLE_MIMES=(
+  application/x-appimage
+  application/vnd.appimage
+  application/x-iso9660-appimage
+  application/vnd.flatpak
+  application/vnd.flatpak.ref
+  application/vnd.snap
+  application/vnd.debian.binary-package
+  application/x-rpm
+  application/x-archlinux-package
+)
+
+# The stock database classifies AppImages as application/x-executable, so a
+# double click would not reach us. A user-level MIME package fixes the
+# detection for GIO (and therefore Nautilus) without touching /usr.
+integration_mime_xml() {
+  printf '%s/mime/packages/omabundle.xml' "${XDG_DATA_HOME:-$HOME/.local/share}"
+}
+
+integration_write_mime() {
+  local xml
+  xml=$(integration_mime_xml)
+  mkdir -p "$(dirname -- "$xml")"
+  cat >"$xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-appimage">
+    <comment>AppImage application</comment>
+    <comment xml:lang="de">AppImage-Programm</comment>
+    <magic priority="90">
+      <match value="\x7fELF" type="string" offset="0">
+        <match value="AI\x02" type="string" offset="8"/>
+        <match value="AI\x01" type="string" offset="8"/>
+      </match>
+    </magic>
+    <glob pattern="*.AppImage" weight="70"/>
+    <glob pattern="*.appimage" weight="70"/>
+  </mime-type>
+</mime-info>
+XML
+  update-mime-database "${XDG_DATA_HOME:-$HOME/.local/share}/mime" 2>/dev/null || true
+}
+
+integration_handler_path() {
+  printf '%s/omabundle-handle' "$OMABUNDLE_BIN"
+}
+
+integration_enable() {
+  local mime handler exec_path
+  handler=$(integration_handler_path)
+  [[ -x $handler ]] || die "Handler fehlt: $handler"
+  ensure_dirs
+  integration_write_mime
+
+  exec_path=$(desktop_quote "$handler")
+
+  {
+    printf '[Desktop Entry]\n'
+    printf 'Type=Application\n'
+    printf 'Name=Programm installieren (omabundle)\n'
+    printf 'Comment=AppImage, Flatpak, Arch-Paket oder Tarball nativ installieren\n'
+    printf 'Exec=%s %%f\n' "$exec_path"
+    printf 'TryExec=%s\n' "$handler"
+    printf 'Icon=system-software-install\n'
+    printf 'Terminal=false\n'
+    printf 'NoDisplay=true\n'
+    printf 'StartupNotify=false\n'
+    printf 'MimeType=%s\n' "$(IFS=';'; printf '%s' "${OMABUNDLE_MIMES[*]}")"
+  } >"$OMABUNDLE_APPS/omabundle-handle.desktop"
+
+  for mime in "${OMABUNDLE_MIMES[@]}"; do
+    xdg-mime default omabundle-handle.desktop "$mime" \
+      || warn "konnte Standard für $mime nicht setzen"
+  done
+
+  { desktop-file-validate "$OMABUNDLE_APPS/omabundle-handle.desktop" || true; } 2>&1 \
+    | while read -r line; do warn "$line"; done
+  refresh_caches
+  log "✓ Doppelklick-Installation aktiv für: ${OMABUNDLE_MIMES[*]}"
+}
+
+integration_disable() {
+  rm -f -- "$OMABUNDLE_APPS/omabundle-handle.desktop" \
+    "$OMABUNDLE_APPS/omabundle.desktop"
+  rm -f -- "$(integration_mime_xml)"
+  update-mime-database "${XDG_DATA_HOME:-$HOME/.local/share}/mime" 2>/dev/null || true
+
+  remove_app_from_mimeapps omabundle-handle.desktop
+
+  refresh_caches
+  log "✓ Doppelklick-Installation deaktiviert"
+}
+
+integration_status() {
+  local mime current any=0
+  if [[ ! -f $OMABUNDLE_APPS/omabundle-handle.desktop ]]; then
+    log "Integration ist aus."
+    return 0
+  fi
+  log "Integration ist an."
+  for mime in "${OMABUNDLE_MIMES[@]}"; do
+    current=$(xdg-mime query default "$mime" 2>/dev/null || true)
+    if [[ $current == omabundle-handle.desktop ]]; then
+      printf '  ✓ %s\n' "$mime"
+      any=1
+    else
+      printf '  – %s (offen)\n' "$mime"
+    fi
+  done
+  (( any )) || return 1
+}
+
+cmd_integration() {
+  case ${1:-status} in
+    enable) integration_enable ;;
+    disable) integration_disable ;;
+    status) integration_status ;;
+    *) die "Verwendung: omabundle integration <enable|disable|status>" ;;
+  esac
+}
+
+cmd_detect() {
+  local target=${1:-} kind
+  [[ -n $target ]] || die "Verwendung: omabundle detect <datei>"
+  [[ -e $target ]] || die "Datei nicht gefunden: $target"
+  [[ -f $target ]] || die "keine reguläre Datei: $target"
+  kind=$(detect_kind "$target")
+  if (( OMABUNDLE_JSON )); then
+    jq -n --arg kind "$kind" --arg file "$target" --arg note "$(detect_reason "$kind")" \
+      '{kind: $kind, file: $file, note: $note}'
+    return 0
+  fi
+  printf '%-10s %s\n' "$kind" "$(clean_text "$target")"
+  case $kind in
+    deb | rpm | snap | run | elf | unknown) warn "$(detect_reason "$kind")" ;;
+  esac
+}
+
+main() {
+  local args=()
+  while (( $# )); do
+    case $1 in
+      -n | --dry-run) OMABUNDLE_DRYRUN=1 ;;
+      --json) OMABUNDLE_JSON=1 ;;
+      -y | --yes) OMABUNDLE_YES=1 ;;
+      -V | --version) printf 'omabundle 0.1.0\n'; return 0 ;;
+      -h | --help) usage; return 0 ;;
+      --) shift; args+=("$@"); break ;;
+      -*) die "unbekannte Option: $1" ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+  set -- ${args[@]+"${args[@]}"}
+
+  case ${1:-help} in
+    install) shift; cmd_install "$@" ;;
+    list) shift; cmd_list "$@" ;;
+    remove | rm | uninstall) shift; cmd_remove "$@" ;;
+    doctor) shift; cmd_doctor "$@" ;;
+    detect) shift; cmd_detect "$@" ;;
+    integration | integrate) shift; cmd_integration "$@" ;;
+    help | -h | --help) usage ;;
+    *) die "unbekannter Befehl: $1 (omabundle --help)" ;;
+  esac
+}
+
+main "$@"

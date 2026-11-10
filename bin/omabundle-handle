@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# omabundle-handle — desktop file handler.
+#
+# Called by the file manager when a bundle is opened. Runs without a terminal:
+# unprivileged formats install silently and report through a notification,
+# Arch packages go to a visible terminal (sudo), unsupported formats explain
+# themselves instead of failing with a cryptic error.
+#
+# Security notes:
+#  - never escalates privileges itself; pacman runs in a visible terminal
+#  - passes file paths as separate argv entries and shell-quotes the one
+#    command string it has to build for that terminal
+#  - strips control characters from names before they reach a notification
+set -uo pipefail
+umask 077
+
+SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
+CLI="$(dirname -- "$SELF")/omabundle"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omabundle"
+LOG="$STATE/handle.log"
+
+mkdir -p "$STATE"
+chmod 700 "$STATE" 2>/dev/null || true
+[[ -f $LOG ]] && chmod 600 "$LOG" 2>/dev/null
+
+# C0 controls would allow escape-sequence injection into the notification UI
+clean() {
+  printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037\177' | tr '\n\r\t' '   '
+}
+
+notify() { # headline description [urgency]
+  omarchy-notification-send --app-name omabundle -u "${3:-low}" \
+    "$(clean "$1")" "$(clean "$2")" 2>/dev/null \
+    || printf '%s: %s\n' "$1" "$2" >&2
+}
+
+# Like notify, but clicking the card runs the given argv. The argv is already
+# tokenized by the shell and passed as separate words, so a path or name can
+# never be re-parsed into extra commands.
+notify_exec() { # headline description program [args...]
+  local headline=$1 desc=$2
+  shift 2
+  if (($# == 0)); then
+    notify "$headline" "$desc"
+    return
+  fi
+  omarchy-notification-send --app-name omabundle -u low \
+    "$(clean "$headline")" "$(clean "$desc")" --exec "$@" 2>/dev/null \
+    || printf '%s: %s\n' "$headline" "$desc" >&2
+}
+
+usage_failure() {
+  notify "omabundle" "$1" normal
+  printf 'omabundle-handle: %s\n' "$1" >>"$LOG"
+  exit 1
+}
+
+file=${1:-}
+[[ -n $file ]] || usage_failure "Keine Datei übergeben."
+[[ -f $file ]] || usage_failure "Datei nicht gefunden."
+file=$(readlink -f -- "$file") || usage_failure "Pfad nicht auflösbar."
+
+# One detection call; the file manager's own guess is ignored.
+if ! detected=$("$CLI" --json detect "$file" 2>>"$LOG"); then
+  usage_failure "Format konnte nicht geprüft werden. Details: $LOG"
+fi
+kind=$(jq -r '.kind // empty' <<<"$detected" 2>/dev/null)
+note=$(jq -r '.note // empty' <<<"$detected" 2>/dev/null)
+base=$(clean "$(basename -- "$file")")
+
+case $kind in
+  appimage | portable | flatpak | flatpakref)
+    printf '== %s install %q\n' "$(date -Iseconds)" "$file" >>"$LOG"
+    if out=$("$CLI" --json install "$file" 2>>"$LOG"); then
+      name=$(clean "$(jq -r '.name // .slug // "Programm"' <<<"$out" 2>/dev/null)")
+      version=$(clean "$(jq -r '.version // "-"' <<<"$out" 2>/dev/null)")
+      slug=$(clean "$(jq -r '.slug // ""' <<<"$out" 2>/dev/null)")
+      binary=$(jq -r '.binary // empty' <<<"$out" 2>/dev/null)
+
+      # Clicking the notification starts what was just installed: prefer the
+      # desktop entry (works for Flatpaks too) and fall back to the binary.
+      data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+      desktop_file="$data_home/applications/$slug.desktop"
+      launch=()
+      if [[ -n $slug && -f $desktop_file ]] && command -v gio >/dev/null 2>&1; then
+        launch=(gio launch "$desktop_file")
+      elif [[ -n $binary && -x $binary ]]; then
+        launch=("$binary")
+      fi
+
+      notify_exec "Installiert: $name $version" \
+        "Klicken zum Starten · Entfernen: omabundle remove $slug" "${launch[@]}"
+    else
+      notify "Installation fehlgeschlagen" "Details: $LOG" normal
+      exit 1
+    fi
+    ;;
+
+  archpkg)
+    # pacman needs a password prompt, so this one is not silent by design.
+    printf -v cli_q '%q' "$CLI"
+    printf -v file_q '%q' "$file"
+    omarchy-launch-floating-terminal-with-presentation "$cli_q install $file_q" \
+      || usage_failure "Terminal konnte nicht geöffnet werden."
+    ;;
+
+  deb | rpm | snap | run | elf | unknown | '')
+    notify "Nicht installierbar: $base" "${note:-Format nicht erkannt.}" normal
+    printf '== %s rejected %q (%s)\n' "$(date -Iseconds)" "$file" "${kind:-unknown}" >>"$LOG"
+    exit 1
+    ;;
+
+  *)
+    notify "Nicht installierbar: $base" "Unbekanntes Format: $kind" normal
+    exit 1
+    ;;
+esac
