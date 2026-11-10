@@ -26,7 +26,7 @@ install="$pkgname.install"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 # Placeholder until the v$pkgver tag exists. After tagging, run `updpkgsums`
 # in this directory (pacman-contrib) so the AUR package ships a real checksum.
-sha256sums=('SKIP')
+sha256sums=('117b9ef11caa0c7fc2b1060d00a859597ee0e6a453b45385c04a34cfa978cd6d')
 
 package() {
   local dest="$pkgdir/usr/share/$pkgname"
