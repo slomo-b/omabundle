@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# omabundle-omarchy-remove <desktop-id> [name]
+#
+# Remove hook for a cloned omarchy.menu: honors the launcher entry's own
+# X-Omarchy-Uninstall= command (omabundle writes it into every entry it
+# creates). Falls back to Omarchy's stock omarchy-remove-launcher-entry, so
+# entries without the key keep their native behavior.
+#
+# Security notes:
+#  - runs no privileged command itself
+#  - the hook command comes from the entry being removed — the same trust
+#    level as that entry's own Exec line
+set -uo pipefail
+
+id=${1:-}
+name=${2:-$id}
+[[ -n $id ]] || { printf 'Usage: omabundle-omarchy-remove <desktop-id> [name]\n' >&2; exit 1; }
+
+desktop_id=$id
+[[ $desktop_id == *.desktop ]] || desktop_id="$desktop_id.desktop"
+
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+dirs=("$data_home/applications")
+if [[ -n ${XDG_DATA_DIRS-} ]]; then
+  IFS=: read -ra extra <<<"$XDG_DATA_DIRS"
+  for d in "${extra[@]}"; do dirs+=("$d/applications"); done
+else
+  dirs+=("/usr/local/share/applications" "/usr/share/applications")
+fi
+
+desktop_file=""
+for d in "${dirs[@]}"; do
+  [[ -f $d/$desktop_id ]] && { desktop_file=$d/$desktop_id; break; }
+done
+[[ -n $desktop_file ]] || {
+  printf 'omabundle-omarchy-remove: launcher entry not found: %s\n' "$desktop_id" >&2
+  exit 1
+}
+
+if hook=$(sed -n 's/^X-Omarchy-Uninstall=//p' "$desktop_file" | head -1 | tr -d '\r') && [[ -n $hook ]]; then
+  display=$(printf '%q' "$name")
+  exec omarchy-launch-floating-terminal-with-presentation "echo Uninstalling $display...; $hook"
+fi
+
+exec "${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-remove-launcher-entry" "$id" "$name"

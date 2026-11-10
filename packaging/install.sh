@@ -13,7 +13,7 @@ ROOT=$(cd -- "$(dirname -- "$SELF")/.." && pwd)
 
 PREFIX="$HOME/.local"
 TARGET="$PREFIX/share/omabundle"
-LINKS=(omabundle omab omabundle-handle)
+LINKS=(omabundle omab omabundle-handle omabundle-omarchy-remove omabundle-remove-picker)
 
 die()  { printf 'install.sh: %s\n' "$1" >&2; exit 1; }
 says() { printf '%s\n' "$1"; }
@@ -58,6 +58,8 @@ cmd_install() {
 
   install -m755 "$ROOT/bin/omabundle" "$TARGET/bin/omabundle"
   install -m755 "$ROOT/bin/omabundle-handle" "$TARGET/bin/omabundle-handle"
+  install -m755 "$ROOT/bin/omabundle-omarchy-remove" "$TARGET/bin/omabundle-omarchy-remove"
+  install -m755 "$ROOT/bin/omabundle-remove-picker" "$TARGET/bin/omabundle-remove-picker"
   install -m644 "$ROOT"/lib/*.sh "$TARGET/lib/"
   install -m644 "$ROOT"/adapters/*.sh "$TARGET/adapters/"
   install -m644 "$ROOT/LICENSE" "$TARGET/LICENSE"

@@ -39,12 +39,16 @@ package() {
 
   install -m755 "$src/bin/omabundle" "$dest/bin/omabundle"
   install -m755 "$src/bin/omabundle-handle" "$dest/bin/omabundle-handle"
+  install -m755 "$src/bin/omabundle-omarchy-remove" "$dest/bin/omabundle-omarchy-remove"
+  install -m755 "$src/bin/omabundle-remove-picker" "$dest/bin/omabundle-remove-picker"
   install -m644 "$src"/lib/*.sh "$dest/lib/"
   install -m644 "$src"/adapters/*.sh "$dest/adapters/"
 
   ln -s "/usr/share/$pkgname/bin/omabundle" "$pkgdir/usr/bin/omabundle"
   ln -s "/usr/share/$pkgname/bin/omabundle" "$pkgdir/usr/bin/omab"
   ln -s "/usr/share/$pkgname/bin/omabundle-handle" "$pkgdir/usr/bin/omabundle-handle"
+  ln -s "/usr/share/$pkgname/bin/omabundle-omarchy-remove" "$pkgdir/usr/bin/omabundle-omarchy-remove"
+  ln -s "/usr/share/$pkgname/bin/omabundle-remove-picker" "$pkgdir/usr/bin/omabundle-remove-picker"
 
   install -m644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -m644 "$src/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"

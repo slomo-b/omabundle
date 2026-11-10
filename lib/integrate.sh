@@ -84,6 +84,9 @@ write_desktop() {
     [[ -n $mime ]] && printf 'MimeType=%s\n' "$mime"
     [[ -n $wmclass ]] && printf 'StartupWMClass=%s\n' "$(desktop_text "$wmclass")"
     printf 'X-Omabundle=%s\n' "$slug"
+    # Self-describing uninstaller for the desktop's native remove action
+    # (Omarchy's omarchy-remove-launcher-entry; harmless where unsupported).
+    printf 'X-Omarchy-Uninstall=omabundle remove %s\n' "$slug"
   } >"$file"
 
   if ! err=$(desktop-file-validate "$file" 2>&1); then

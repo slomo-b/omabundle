@@ -90,7 +90,7 @@ omabundle integration disable
 
 | File | Behavior |
 |---|---|
-| `.AppImage`, portable archives | installed silently, short notification; clicking the notification starts the app |
+| `.AppImage`, portable archives | notification on start and on success; clicking the success notification starts the app |
 | `.flatpak`, `.flatpakref` | same |
 | `.pkg.tar.*` | opens a visible terminal with a password prompt, because `pacman` needs sudo |
 | `.deb`, `.rpm`, `.snap`, `.run` | notification with the reason, nothing else |
@@ -147,6 +147,34 @@ important for pacman runs).
 | `~/.local/state/omabundle/db.json` | ledger |
 | `~/.local/state/omabundle/handle.log` | handler log |
 
+## Omarchy Remove integration
+
+Every launcher entry omabundle writes carries
+`X-Omarchy-Uninstall=omabundle remove <slug>` — a self-describing removal
+command. Omarchy's launcher Remove honors it through a cloned menu plugin
+(one-time setup):
+
+```bash
+omarchy plugin clone omarchy.menu
+```
+
+Then in `~/.config/omarchy/plugins/<user>.menu/Menu.qml`, replace the
+`root.appLibrary.remove(...)` line in `confirmDelete()` with:
+
+```qml
+Util.execDetached("omabundle-omarchy-remove "
+  + Util.shellQuote(String(target.appId || ""))
+  + " " + Util.shellQuote(String(target.label || "")))
+```
+
+`omabundle-omarchy-remove` (installed with omabundle) runs the entry's own
+uninstall command; entries without the key keep Omarchy's stock remove
+behavior. Removing an omabundle-installed app from the launcher then
+uninstalls it completely — files, menu entry, ledger. The upstream
+alternative, teaching `omarchy-remove-launcher-entry` the key directly, is
+prepared in
+[packaging/omarchy-remove-launcher-entry.patch](packaging/omarchy-remove-launcher-entry.patch).
+
 ## Security
 
 The full audit is in [SECURITY.md](SECURITY.md): threat model, findings
@@ -171,9 +199,9 @@ omabundle deliberately has **no graphical interface**. There are exactly two
 paths:
 
 1. **Double-click** a downloaded file in your file manager — after a one-time
-   `omabundle integration enable`, installs happen silently in the
-   background. The success notification can be clicked to launch what was
-   just installed.
+   `omabundle integration enable`, installs run in the background with
+   immediate feedback: a start notification, then a success notification that
+   can be clicked to launch what was just installed.
 2. **Command line** for everything else (see above).
 
 No window, no panel, no daemon, no plugin inside the `omarchy-shell`
@@ -192,3 +220,4 @@ MIT.
 - [ ] P2: `omabundle update` (only when the source URL is known)
 - [ ] P3: `.deb`/`.rpm` adapter with a distrobox hint
 - [ ] AUR package once registration reopens
+- [ ] Omarchy upstream: honor `X-Omarchy-Uninstall` in `omarchy-remove-launcher-entry` (patch ready in `packaging/`; covered locally via a cloned `omarchy.menu`)

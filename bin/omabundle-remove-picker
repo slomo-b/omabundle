@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# omabundle-remove-picker — fzf TUI to remove omabundle-installed apps.
+#
+# Wired into the Omarchy menu (remove.omabundle) through the user's
+# omarchy-menu.jsonc extension. Same pattern as omarchy-pkg-remove:
+# multi-select in fzf, then a visible removal per slug.
+set -uo pipefail
+
+command -v fzf >/dev/null 2>&1 || { echo "fzf fehlt: pacman -S fzf"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq fehlt"; exit 1; }
+
+rows=$(omabundle --json list 2>/dev/null | jq -r '
+  [.slug, (.name // .slug), (.version // "-"), .kind] | @tsv')
+[[ -n $rows ]] || { echo "Nichts über omabundle installiert."; exit 0; }
+
+picked=$(printf '%s\n' "$rows" | fzf --multi \
+  --delimiter '\t' \
+  --with-nth '2,1,3' \
+  --header 'tab: mehrfach auswählen · enter: entfernen · esc: abbrechen' \
+  --preview "omabundle --json list | jq -r --arg slug {1} 'select(.slug == \$slug)'" \
+  --preview-window 'down:40%:wrap' \
+  --color 'pointer:red,marker:red')
+
+[[ -n $picked ]] || exit 0
+
+rc=0
+while IFS=$'\t' read -r slug _; do
+  [[ -n $slug ]] || continue
+  omabundle remove "$slug" || rc=1
+done <<<"$picked"
+omarchy-show-done "$rc"
