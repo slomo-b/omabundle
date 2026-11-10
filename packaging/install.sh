@@ -49,7 +49,7 @@ link_target_of() { # cmd
   readlink -- "$link"
 }
 
-is_ours() { # cmd
+is_ours() { # cmd: present and pointing at this install
   [[ $(link_target_of "$1" 2>/dev/null || true) == "$TARGET/bin/$1" ]]
 }
 
@@ -84,10 +84,13 @@ cmd_install() {
 
 cmd_uninstall() {
   for cmd in "${LINKS[@]}"; do
+    [[ -L $PREFIX/bin/$cmd ]] || continue
     is_ours "$cmd" || die "$PREFIX/bin/$cmd gehört nicht zu dieser Installation."
   done
 
-  rm -f -- "${LINKS[@]/#/$PREFIX/bin/}"
+  for cmd in "${LINKS[@]}"; do
+    is_ours "$cmd" && rm -f -- "$PREFIX/bin/$cmd"
+  done
   rm -rf -- "$TARGET"
   says "omabundle entfernt ($TARGET)"
 }
