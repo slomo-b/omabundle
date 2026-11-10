@@ -1,183 +1,172 @@
 # omabundle
 
-Installiert portable Linux-Programme **nativ** auf Omarchy (Arch Linux) und
-entfernt sie wieder sauber. Kein Container, keine Konvertierung, kein
-Fremd-Paketmanager, **keine GUI**: alles läuft im Hintergrund über
-Doppelklick oder die Kommandozeile.
+omabundle installiert portable Linux-Programme **nativ** auf Omarchy
+(Arch Linux) und entfernt sie wieder sauber. Kein Container, keine
+Konvertierung, kein Fremd-Paketmanager, **keine GUI** und keine laufende
+Shell-Abhängigkeit: nach dem Einrichten bleibt das System garantiert.
 
 ```
 omabundle install ~/Downloads/Obsidian-1.5.3.AppImage
-omabundle install ./tool.pkg.tar.zst
-omabundle install ./app.flatpak
-omabundle install org.gimp.GIMP
+omabundle install ./app.flatpak          # oder .flatpakref oder org.gimp.GIMP
 omabundle list
-omabundle doctor
 omabundle remove obsidian
+omabundle doctor
 ```
 
-## Unterstützt
+## Was installiert werden kann
 
-| Format | Erkennung | Ablage |
+| Datei | Inhalt | Ablage |
 |---|---|---|
-| `.AppImage` (Type 1/2) | ELF + `AI\x01/\x02` oder SquashFS-Payload | `~/.local/opt/<slug>/<version>/` |
-| `.pkg.tar.{zst,xz,gz}` | `.PKGINFO` im Tar | pacman (`sudo`) |
-| `.flatpak`, `.flatpakref`, App-ID | `metadata` bzw. `[Flatpak Ref]` | Flatpak |
-| `.tar.*`, `.zip` mit `AppRun`/`bin/` | Archiv + Heuristik | `~/.local/opt/<slug>/<version>/app/` |
+| `.AppImage` (Type 1/2) | ELF + `AI\x01`/`AI\x02` bzw. SquashFS | `~/.local/opt/<slug>/<version>/` |
+| `.pkg.tar.{zst,xz,gz}` | `.PKGINFO` im Tar | `pacman` im sichtbaren Terminal |
+| `.flatpak` | `metadata` mit `[Application]` | Flatpak |
+| `.flatpakref` | `[Flatpak Ref]`-Datei | Flatpak |
+| Flatpak App-ID | z. B. `org.gimp.GIMP` | Flatpak |
+| `.tar.{zst,xz,gz}`, `.zip` und andere Archive, die `bsdtar` lesen kann | Inhalt mit `AppRun` oder `bin/` | `~/.local/opt/<slug>/<version>/app/` |
 
-## Bewusst nicht unterstützt
+Bewusst nicht installiert (mit Begründung, keine stillen Fehler):
 
-`.deb`, `.rpm`, `.snap` und selbstentpackende `.run`-Installer. Die ersten
-beiden brauchen einen fremden Paketmanager (Lösung: `distrobox` oder
-`debtap`), `snap` ist auf Arch nicht unterstützt, und `.run`-Skripte
-schreiben unkontrolliert ins System — genau der Weg zu einem kaputten Arch.
-
-`omabundle detect <datei>` nennt das Format und den Grund für die Ablehnung,
-ohne etwas zu verändern.
-
-## Was bei einer Installation passiert
-
-1. **Erkennen** über Magic Bytes, nicht über den Dateinamen.
-2. **Metadaten lesen** (Name, Comment, Kategorien, MIME-Typen, Icon) aus dem
-   AppImage bzw. dem mitgelieferten `.desktop`-Eintrag.
-3. **Ablegen** unter `~/.local/opt/<slug>/<version>/`, Symlink nach
-   `~/.local/bin/<slug>`.
-4. **Integrieren**: `.desktop`-Eintrag (validiert mit
-   `desktop-file-validate`), Icon in `~/.local/share/icons/hicolor`,
-   Cache-Updates. Der Eintrag nennt die vom Programm deklarierten MIME-Typen,
-   überschreibt aber **keine** Standard-Zuordnungen — sonst könnte ein
-   installiertes Bundle z. B. alle PDFs übernehmen.
-5. **Ledger** in `~/.local/state/omabundle/db.json` — nur was dort steht,
-   kann `remove` wieder löschen.
-
-## Design-Entscheidungen
-
-- **Ledger statt Raten.** `remove` löscht nur, was `install` angelegt hat.
-  `doctor` findet tote Symlinks, fehlende Icons und verwaiste Einträge.
-- **Kein `sudo` im Hintergrund.** Privilegierte Schritte (pacman) laufen nur
-  nach Bestätigung in einem sichtbaren Terminal über
-  `omarchy-launch-floating-terminal-with-presentation`. Der stille
-  Doppelklick-Handler startet niemals `sudo`.
-- **Kein Auto-Download.** Quellen werden gespeichert, aber nicht automatisch
-  nachgeladen.
-- **Ehrliche Fehler.** `GLIBC_2.xx not found` oder fehlende `.so` sind nicht
-  reparierbar; `doctor` und der Startpfad melden das, statt still zu brechen.
-- **`--dry-run` verändert nichts** — auch keine `chmod` auf der Quelldatei.
-
-## Voraussetzungen
-
-- `bash`, `jq`, `bsdtar` (libarchive), `file`, `desktop-file-validate`,
-  `flock`, `realpath` (auf Omarchy vorhanden)
-- `squashfs-tools` (`unsquashfs`) — **Pflicht** für AppImages. Metadaten werden
-  gelesen, ohne die Datei auszuführen: `omarchy pkg add squashfs-tools`
-- `fuse2` nur für das *Ausführen* von AppImages: `omarchy pkg add fuse2`
-- `flatpak` für Flatpaks: `omarchy pkg add flatpak`
-
-Ohne `squashfs-tools` verweigert `omabundle` die AppImage-Installation
-bewusst, statt die heruntergeladene Datei zum Auslesen der Metadaten
-auszuführen.
-
-## Doppelklick-Installation (Integration)
-
-```bash
-omabundle integration enable     # einmalig einrichten
-omabundle integration status
-omabundle integration disable
-```
-
-Danach reicht in Nautilus ein Doppelklick auf eine heruntergeladene Datei:
-
-| Datei | Verhalten |
+| Format | Grund |
 |---|---|
-| `.AppImage` | wird **still installiert**, danach kurze Benachrichtigung, Start über App-Menü |
-| `.flatpak`, `.flatpakref` | dito |
-| `.pkg.tar.*` | öffnet ein Terminal mit Passwortabfrage (pacman braucht sudo) |
-| `.deb`, `.rpm`, `.snap` | Benachrichtigung mit Begründung, sonst nichts |
+| `.deb`, `.rpm` | läuft nur mit `distrobox` oder `debtap` |
+| `.snap` | auf Arch/Omarchy nicht unterstützt |
+| `.run` (self-extracting) | schreibt unkontrolliert ins System |
+| nackte ELF/ausführbare Datei | keine Metadaten, bitte als Tarball beziehen |
 
-Was `integration enable` anlegt (alles im Benutzerbereich, kein sudo):
-
-- `~/.local/share/applications/omabundle-handle.desktop` — unsichtbarer Handler
-  (`NoDisplay=true`) mit den passenden `MimeType`-Einträgen
-- `~/.local/share/mime/packages/omabundle.xml` — MIME-Typ `application/x-appimage`
-  (die Systemdatenbank stuft AppImages teils als `application/x-executable` ein)
-- `xdg-mime default …` in `~/.config/mimeapps.list`
-
-Technische Notiz: `xdg-mime query` nutzt `file` und ist hier unzuverlässig;
-Nautilus nutzt **GIO**, und GIO liest die Benutzer-MIME-Datenbank. Getestet mit
-`gio open` (derselbe Pfad wie ein Doppelklick) — Installation, Benachrichtigung
-und Ledger-Eintrag funktionieren.
-
-Bewusst **nicht** als Handler registriert: `.tar.gz`, `.zip`, `.zst` (würde
-jedes Archiv übernehmen) sowie `.run` und nackte ELF-Dateien (würde alle
-ausführbaren Dateien übernehmen). Für diese Formate bleibt `omabundle install`.
-`.run` wird dort erkannt und mit Begründung abgelehnt.
+`omabundle detect <datei>` nennt genau das Format samt Grund, ohne etwas zu
+verändern.
 
 ## Installation des Tools
 
-### makepkg aus dem Release-Tag (empfohlen)
+### GitHub mit `install.sh` (empfohlen)
 
 ```bash
-git clone -b v0.1.1 --depth 1 https://github.com/slomo-b/omabundle
+git clone -b v0.1.2 --depth 1 https://github.com/slomo-b/omabundle
 cd omabundle/packaging
-makepkg -si
-omabundle integration enable
+./install.sh              # installiert nach ~/.local, ohne sudo
+omabundle integration enable   # Doppelklick-Installation aktivieren
 ```
 
-`makepkg -si` baut und installiert mit `pacman`; die sudo-Abfrage läuft im
-Terminal. `pacman` verwaltet die Installation, `sudo pacman -Rns omabundle`
-entfernt sie wieder komplett.
-
-### Ohne pacman: `install.sh`
+Alternativ direkt aus dem Release (ohne `git`) — die `.sha256`-Datei liegt im
+Release und wird von `install.sh` nicht benötigt:
 
 ```bash
-git clone -b v0.1.1 --depth 1 https://github.com/slomo-b/omabundle
-cd omabundle/packaging
-./install.sh            # installiert nach ~/.local, ohne sudo
+curl -LO https://github.com/slomo-b/omabundle/releases/download/v0.1.2/install.sh
+sha256sum install.sh      # 7d66bda3fb68f8edbcb386a5a39ae2e7cf6fdf3ed8a0b63d408a31b0528da2ab
+bash install.sh           # nie curl | bash, immer lokal ausführen
 omabundle integration enable
 ```
 
 `install.sh` kopiert die Skripte nach `~/.local/share/omabundle` und legt die
- Links `omabundle`, `omab` und `omabundle-handle` in `~/.local/bin` an. Mit
-`./install.sh --enable` wird die Doppelklick-Integration direkt mit
-eingerichtet; `./install.sh uninstall` entfernt alles wieder. Es wird kein ein
-einziger privilegierter Befehl ausgeführt.
+Links `omabundle`, `omab` und `omabundle-handle` in `~/.local/bin` an. Mit
+`./install.sh --enable` wird die Doppelklick-Integration gleich mit
+eingerichtet; `./install.sh uninstall` entfernt alles wieder. Kein einziger
+privilegierter Befehl wird ausgeführt. Die Doppelklick-Integration findet den
+Handler über `PATH`, siehe `bin/omabundle` → `integration_handler_path`.
 
-### AUR (sobald verfügbar)
+### pacman über `makepkg`
 
 ```bash
-omarchy pkg aur add omabundle
+git clone -b v0.1.2 --depth 1 https://github.com/slomo-b/omabundle
+cd omabundle/packaging
+makepkg -si               # installiert systemweit über pacman, sudo im Terminal
+omabundle integration enable   # danach als normaler Benutzer
+```
+
+Entfernen: `sudo pacman -Rns omabundle` und danach
+`omabundle integration disable`.
+
+### AUR
+
+Ein AUR-Paket folgt, sobald die AUR-Registrierung wieder offen ist. Das
+`packaging/PKGBUILD` ist dafür vorbereitet (`packaging/README.md` enthält den
+Ablauf).
+
+## Doppelklick-Installation
+
+```bash
 omabundle integration enable
+omabundle integration status
+omabundle integration disable
 ```
 
-Erfordert einen AUR-Account; die Registrierung ist derzeit pausiert.
+| Datei | Verhalten |
+|---|---|
+| `.AppImage`, portable Archive | still installiert, kurze Benachrichtigung, Klick auf die Meldung startet das Programm |
+| `.flatpak`, `.flatpakref` | dito |
+| `.pkg.tar.*` | öffnet ein sichtbares Terminal mit Passwortabfrage, weil `pacman` sudo braucht |
+| `.deb`, `.rpm`, `.snap`, `.run` | Benachrichtigung mit Begründung, sonst nichts |
 
-### Manuell aus dem Repo (Entwicklung)
+Bewusst **nicht** als Handler registriert sind `.tar.gz`, `.zip`, `.zst` und
+ nackte ELF-Dateien, sonst würde omabundle jeden Download übernehmen. Für
+diese Formate bleibt `omabundle install` (oder `omabundle detect`).
+
+## Was bei einer Installation passiert
+
+1. **Erkennen** über Magic Bytes, nie über den Dateinamen.
+2. **Metadaten lesen** (Name, Comment, Kategorien, MIME-Typen, Icon) mit
+   `unsquashfs -cat` oder aus `.desktop`-Dateien — niemals durch Ausführen
+   der heruntergeladenen Datei.
+3. **Ablage** unter `~/.local/opt/<slug>/<version>/`, Symlink nach
+   `~/.local/bin/<slug>`.
+4. **Integrieren**: `.desktop`-Eintrag (validiert mit
+   `desktop-file-validate`), Icon unter `~/.local/share/icons/hicolor`,
+   Cache-Refresh. Die Einträge deklarieren die MIME-Typen des Programms,
+   überschreiben also **keine** Standard-Zuordnungen. Ein installiertes
+   Bundle kann nie "alle PDFs übernehmen".
+5. **Ledger** in `~/.local/state/omabundle/db.json` — nur was dort steht,
+   kann `remove` wieder löschen.
+
+Damit ist das Entfernen exakt: `omabundle remove <slug>` löscht nur, was
+`install` angelegt hat. `omabundle doctor` findet tote Symlinks, fehlende
+Icons und verwaiste Ledger-Einträge.
+
+## Kommandozeile
 
 ```bash
-mkdir -p ~/.local/bin
-ln -sfn ~/Code/omabundle/bin/omabundle ~/.local/bin/omabundle
-ln -sfn ~/Code/omabundle/bin/omabundle ~/.local/bin/omab
-ln -sfn ~/Code/omabundle/bin/omabundle-handle ~/.local/bin/omabundle-handle
+omabundle install <datei|app-id>   # AppImage, .pkg.tar.*, Flatpak, Tarball
+omabundle list                      # Ledger anzeigen
+omabundle remove <slug>             # sauber entfernen
+omabundle doctor                    # alles prüfen
+omabundle detect <datei>            # Format erkennen, ohne etwas zu tun
+omabundle integration enable|status|disable
 ```
 
-`omabundle-handle` muss im `PATH` liegen, weil der Desktop-Handler ihn über
-den Dateinamen aufruft. Danach `omabundle integration enable` ausführen.
+Optionen: `-n --dry-run` (verändert nichts, auch keine `chmod` auf der
+Quelldatei), `--json` (maschinenlesbar), `-y --yes` (Rückfragen überspringen,
+wichtig für pacman-Aufrufe).
+
+## Dateisystem
+
+| Pfad | Zweck |
+|---|---|
+| `~/.local/opt/<slug>/<version>/` | installierte Programme |
+| `~/.local/bin/<slug>` | Befehl startet das Programm |
+| `~/.local/share/applications/<slug>.desktop` | Menüeintrag |
+| `~/.local/share/icons/hicolor/.../<slug>.png` / `svg` | Icon |
+| `~/.local/share/applications/omabundle-handle.desktop` | der unsichtbare Handler |
+| `~/.local/share/mime/packages/omabundle.xml` | `application/x-appimage` und Freunde |
+| `~/.config/mimeapps.list` | die 9 aktivierten MIME-Typen |
+| `~/.local/state/omabundle/db.json` | Ledger |
+| `~/.local/state/omabundle/handle.log` | Handler-Protokoll |
 
 ## Sicherheit
 
-Der vollständige Audit-Bericht steht in [SECURITY.md](SECURITY.md): Bedrohungs-
-modell, gefundene Punkte (F1–F29), Behebung und ausdrücklich verbleibende
-Risiken. Kurzfassung:
+Der volle Audit-Bericht steht in [SECURITY.md](SECURITY.md): Bedrohungsmodell,
+gefundene Punkte (F1–F29), Behebung und verbleibende Risiken. Kernpunkte:
 
-- Installieren führt **keinen** Code aus dem Paket aus. AppImage-Metadaten
-  werden mit `unsquashfs -cat` gelesen, nicht durch Starten des AppImage.
-- Fremde Textfelder (Name, Comment, MIME-Typen, Kategorien) werden gefiltert,
+- **Kein Code aus dem Paket wird beim Installieren ausgeführt.** AppImage-
+  Metadaten werden mit `unsquashfs -cat` gelesen.
+- **Textfelder** (Name, Comment, Kategorie, MIME) gefiltert und bereinigt,
   bevor sie in `.desktop`-Dateien oder Benachrichtigungen landen.
-- Ledger-Pfade werden vor `rm -rf` mit `realpath` gegen `~/.local/opt`
-  geprüft; kompromittierte JSON-Einträge können nicht nach außen zeigen.
-- Archive werden vor dem Entpacken auf Dateianzahl und Größe geprüft;
-  AppImage-Metadaten werden pro Datei größenbegrenzt gelesen.
-- Privilegierte Schritte (`pacman`) laufen nie unsichtbar, sondern nur im
-  sichtbaren Terminal nach Bestätigung.
+- **Ledger-Pfade** gegen `~/.local/opt` mit `realpath` geprüft; ein kompro-
+  mittierter Eintrag kann nicht nach außen zeigen.
+- **Archive** werden auf Dateianzahl und Gesamtgröße limitiert; AppImage-
+  Metadaten werden pro Datei größenbegrenzt gelesen.
+- **Privilegien**: `sudo`/`pacman` nur nach Bestätigung in einem sichtbaren
+  Terminal. Der Hintergrund-Handler startet nie `sudo`.
+- **Startklick auf Benachrichtigung** startet das Programm als Argv-Array,
+  nicht als Shell-String.
 
 ## Hintergrundbetrieb
 
@@ -187,28 +176,21 @@ omabundle hat bewusst **keine grafische Oberfläche**. Es gibt genau zwei Wege:
    einmaligem `omabundle integration enable` läuft die Installation still im
    Hintergrund. Die Erfolgsmeldung lässt sich anklicken und startet das
    installierte Programm direkt.
-2. **Kommandozeile** für alles Weitere:
+2. **Kommandozeile** für alles Weitere (siehe oben).
 
-```bash
-omabundle install <datei|app-id>
-omabundle list
-omabundle remove <slug>
-omabundle doctor
-omabundle integration enable|disable|status
-```
-
-Damit lässt sich omabundle wie ein normaler Systembaustein behandeln: einmal
-einrichten, danach Programme per Doppelklick installieren und über die CLI
-verwalten. Kein Fenster, kein Panel, kein Hintergrunddienst.
+Kein Fenster, kein Panel, kein Hintergrunddienst, kein Plugin im
+`omarchy-shell`-Prozess.
 
 ## Lizenz
 
-MIT — siehe [LICENSE](LICENSE).
+MIT License.
 
 ## Roadmap
 
 - [x] P0: Detection, AppImage, Arch-Paket, Flatpak, Portable, Ledger, Remove, Doctor
 - [x] P1: Doppelklick-Installation (MIME-Handler, still + Benachrichtigung)
-- [x] Security-Audit: siehe [SECURITY.md](SECURITY.md)
+- [x] Security-Audit: F1–F29
+- [x] `install.sh` für Install-Ansätze ohne pacman
 - [ ] P2: `omabundle update` (nur wenn Quelle/URL bekannt)
 - [ ] P3: `.deb`/`.rpm`-Hinweisadapter mit distrobox-Anbindung
+- [ ] AUR-Paket, sobald die Registrierung wieder offen ist

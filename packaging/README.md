@@ -1,6 +1,31 @@
 # Packaging
 
-`PKGBUILD` builds an Arch package that installs omabundle under
+The primary install path is `install.sh` (user-level, no root). The
+`PKGBUILD` remains for pacman users and for a future AUR package:
+
+```
+packaging/install.sh          # user-level install into ~/.local
+packaging/PKGBUILD            # pacman install into /usr/share/omabundle
+packaging/omabundle.install   # pacman install/upgrade messages
+```
+
+## `install.sh`
+
+Runs from a checked-out omabundle tree or from the `install.sh` asset that
+ships with each release. It never escalates privileges:
+
+```bash
+./install.sh            # install into ~/.local
+./install.sh --enable   # also run `omabundle integration enable`
+./install.sh uninstall  # refuses links that belong to another install
+./install.sh status
+```
+
+It is idempotent: re-running it upgrades the installed tree in place.
+
+## `PKGBUILD`
+
+Builds an Arch package that installs omabundle under
 `/usr/share/omabundle` and exposes three commands in `/usr/bin`:
 
 ```
@@ -12,9 +37,7 @@ omabundle-handle
 The scripts resolve their own location with `readlink -f`, so the symlinks
 work without patching paths.
 
-## Dependencies
-
-Runtime dependencies are declared in the `PKGBUILD`:
+### Dependencies
 
 - `bash`, `coreutils`, `util-linux` — shell, `realpath`, `flock`
 - `jq` — ledger and metadata
@@ -27,7 +50,7 @@ Runtime dependencies are declared in the `PKGBUILD`:
 
 Optional: `fuse2` to run AppImages, `flatpak` to install Flatpaks.
 
-## Release steps
+### AUR release steps
 
 1. Bump `pkgver` in `PKGBUILD` and commit.
 2. Tag and push the release:
@@ -40,20 +63,13 @@ Optional: `fuse2` to run AppImages, `flatpak` to install Flatpaks.
    cd packaging
    updpkgsums
    ```
-   `updpkgsums` is in `pacman-contrib`. The committed `SKIP` is only a
-   placeholder and must not reach the AUR.
+   `updpkgsums` is in `pacman-contrib`.
 4. Generate the AUR metadata file and test the build:
    ```bash
    makepkg --printsrcinfo > .SRCINFO
    makepkg -si
    ```
-5. Verify the installed layout:
-   ```bash
-   pacman -Ql omabundle
-   omabundle --help
-   omabundle doctor
-   ```
-6. Publish to the AUR:
+5. Publish to the AUR once registration reopens:
    ```bash
    git clone ssh://aur@aur.archlinux.org/omabundle.git /tmp/aur-omabundle
    cp PKGBUILD .SRCINFO omabundle.install /tmp/aur-omabundle/
@@ -65,14 +81,3 @@ Optional: `fuse2` to run AppImages, `flatpak` to install Flatpaks.
 
 Only `PKGBUILD`, `.SRCINFO` and the `.install` file belong in the AUR
 repository. The source archive stays on GitHub.
-
-## Installing from the AUR
-
-```bash
-omarchy pkg aur add omabundle
-omabundle integration enable
-```
-
-`omarchy pkg aur add` runs `makepkg` and installs with `pacman`; it requests
-sudo in the terminal. The integration step is per-user and must not run as
-root.

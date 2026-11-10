@@ -1,6 +1,6 @@
 # Maintainer: Morris Bollhalter <contact@mo-freelancer.ch>
 pkgname=omabundle
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Install AppImages, Arch packages, Flatpaks and portable archives natively on Omarchy"
 arch=('any')
