@@ -57,6 +57,16 @@ usage_failure() {
 
 file=${1:-}
 [[ -n $file ]] || usage_failure "Keine Datei übergeben."
+
+# Some launchers hand us a file:// URI instead of a plain path.
+if [[ $file == file://* ]]; then
+  file=${file#file://}
+  file=${file#localhost}
+  file=${file%%\?*}
+  file=${file//\\/} # %b must never see backslash escapes from the data
+  file=$(printf '%b' "${file//%/\\x}") || usage_failure "Pfad nicht lesbar."
+fi
+
 [[ -f $file ]] || usage_failure "Datei nicht gefunden."
 file=$(readlink -f -- "$file") || usage_failure "Pfad nicht auflösbar."
 
@@ -71,6 +81,10 @@ base=$(clean "$(basename -- "$file")")
 case $kind in
   appimage | portable | flatpak | flatpakref)
     printf '== %s install %q\n' "$(date -Iseconds)" "$file" >>"$LOG"
+    # Feedback before anything else: a large bundle takes a while, and the
+    # user must know that the open actually did something.
+    notify "Wird installiert: $base" \
+      "omabundle arbeitet im Hintergrund – Erfolgsmeldung folgt." normal
     if out=$("$CLI" --json install "$file" 2>>"$LOG"); then
       name=$(clean "$(jq -r '.name // .slug // "Programm"' <<<"$out" 2>/dev/null)")
       version=$(clean "$(jq -r '.version // "-"' <<<"$out" 2>/dev/null)")
@@ -90,7 +104,9 @@ case $kind in
 
       notify_exec "Installiert: $name $version" \
         "Klicken zum Starten · Entfernen: omabundle remove $slug" "${launch[@]}"
+      printf '== %s done %q (%s %s)\n' "$(date -Iseconds)" "$file" "$slug" "$version" >>"$LOG"
     else
+      printf '== %s failed %q\n' "$(date -Iseconds)" "$file" >>"$LOG"
       notify "Installation fehlgeschlagen" "Details: $LOG" normal
       exit 1
     fi
