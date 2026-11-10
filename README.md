@@ -113,22 +113,46 @@ ausführbaren Dateien übernehmen). Für diese Formate bleibt `omabundle install
 
 ## Installation des Tools
 
-### AUR (empfohlen)
+### makepkg aus dem Release-Tag (empfohlen)
+
+```bash
+git clone -b v0.1.1 --depth 1 https://github.com/slomo-b/omabundle
+cd omabundle/packaging
+makepkg -si
+omabundle integration enable
+```
+
+`makepkg -si` baut und installiert mit `pacman`; die sudo-Abfrage läuft im
+Terminal. `pacman` verwaltet die Installation, `sudo pacman -Rns omabundle`
+entfernt sie wieder komplett.
+
+### Ohne pacman: `install.sh`
+
+```bash
+git clone -b v0.1.1 --depth 1 https://github.com/slomo-b/omabundle
+cd omabundle/packaging
+./install.sh            # installiert nach ~/.local, ohne sudo
+omabundle integration enable
+```
+
+`install.sh` kopiert die Skripte nach `~/.local/share/omabundle` und legt die
+ Links `omabundle`, `omab` und `omabundle-handle` in `~/.local/bin` an. Mit
+`./install.sh --enable` wird die Doppelklick-Integration direkt mit
+eingerichtet; `./install.sh uninstall` entfernt alles wieder. Es wird kein ein
+einziger privilegierter Befehl ausgeführt.
+
+### AUR (sobald verfügbar)
 
 ```bash
 omarchy pkg aur add omabundle
 omabundle integration enable
 ```
 
-`omarchy pkg aur add` baut das Paket mit `makepkg` und installiert es mit
-`pacman`; die sudo-Abfrage läuft im Terminal. `integration enable` danach als
-normaler Benutzer ausführen — es richtet nur den MIME-Handler im
-Benutzerbereich ein.
+Erfordert einen AUR-Account; die Registrierung ist derzeit pausiert.
 
 ### Manuell aus dem Repo (Entwicklung)
 
 ```bash
-git clone https://github.com/slomo-b/omabundle ~/Code/omabundle
 mkdir -p ~/.local/bin
 ln -sfn ~/Code/omabundle/bin/omabundle ~/.local/bin/omabundle
 ln -sfn ~/Code/omabundle/bin/omabundle ~/.local/bin/omab

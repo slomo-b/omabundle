@@ -1,6 +1,6 @@
 # Maintainer: Morris Bollhalter <contact@mo-freelancer.ch>
 pkgname=omabundle
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Install AppImages, Arch packages, Flatpaks and portable archives natively on Omarchy"
 arch=('any')
@@ -26,7 +26,7 @@ install="$pkgname.install"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 # Placeholder until the v$pkgver tag exists. After tagging, run `updpkgsums`
 # in this directory (pacman-contrib) so the AUR package ships a real checksum.
-sha256sums=('7d141fba9c2855da093af4999ff166521202616bbd174c7d1ea2876c1e6efa15')
+sha256sums=('SKIP')
 
 package() {
   local dest="$pkgdir/usr/share/$pkgname"

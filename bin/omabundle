@@ -291,13 +291,13 @@ XML
 }
 
 integration_handler_path() {
-  printf '%s/omabundle-handle' "$OMABUNDLE_BIN"
+  command -v omabundle-handle 2>/dev/null
 }
 
 integration_enable() {
   local mime handler exec_path
-  handler=$(integration_handler_path)
-  [[ -x $handler ]] || die "Handler fehlt: $handler"
+  handler=$(integration_handler_path) \
+    || die "omabundle-handle nicht im PATH. Installation prüfen (omabundle doctor)."
   ensure_dirs
   integration_write_mime
 
