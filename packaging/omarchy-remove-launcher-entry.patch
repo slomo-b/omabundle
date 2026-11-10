@@ -1,0 +1,19 @@
+--- a/bin/omarchy-remove-launcher-entry	2026-11-10 16:27:11.714715548 +0100
++++ b/bin/omarchy-remove-launcher-entry	2026-11-10 16:27:16.127614551 +0100
+@@ -77,6 +77,16 @@
+   exit 0
+ fi
+ 
++# Self-describing uninstallers: a launcher entry may carry its own removal
++# command in X-Omarchy-Uninstall=, written e.g. by third-party installers
++# such as omabundle. Running it removes the app itself, not just the menu
++# entry that the user-file case below would delete.
++if uninstall_cmd="$(sed -n 's/^X-Omarchy-Uninstall=//p' "$desktop_file" | head -1 | tr -d '\r')" && [[ -n $uninstall_cmd ]]; then
++  display_name="${entry_name:-$desktop_name}"
++  quoted_display="$(printf '%q' "$display_name")"
++  exec omarchy-launch-floating-terminal-with-presentation "echo Uninstalling $quoted_display...; $uninstall_cmd"
++fi
++
+ if is_user_desktop_file; then
+   display_name="${entry_name:-$desktop_name}"
+   rm -f "$desktop_file"
